@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "A bun test preload that blocks outbound fetch from the suite, loopback excepted.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zz-plant/bun-test-network-guard.git"
+  },
+  "homepage": "https://github.com/zz-plant/bun-test-network-guard#readme",
+  "bugs": "https://github.com/zz-plant/bun-test-network-guard/issues",
   "author": "Kanav Jain",
   "type": "module",
   "main": "./dist/index.js",
