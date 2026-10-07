@@ -8,6 +8,10 @@ A suite that inherits the network gives a different answer depending on where it
 
 The usual answers (`nock.disableNetConnect`, MSW's `onUnhandledRequest: "error"`) are interceptor libraries shaped around Node's `http` module. Under Bun's native `fetch` they are either awkward or inert. This is 100 lines that wrap `globalThis.fetch` and nothing else.
 
+## Limits
+
+This wraps `fetch` and nothing else. Traffic through `node:http`, `node:net`, `WebSocket`, or `Bun.connect` is not blocked. A blocked call throws, but code under test that catches the error and degrades will still pass its test. A socket-level guard that patches every one of those, plus an `afterEach` that fails any test which attempted a blocked connection, catches both. If your suite talks to the network through anything but `fetch`, you need that broader approach.
+
 ## Install
 
 ```bash
