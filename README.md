@@ -1,69 +1,181 @@
 # bun-test-network-guard
 
-A `bun test` preload that makes an unmocked outbound `fetch` throw. Loopback stays open.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Stop `bun test` from reaching the internet. Any `fetch` to a remote host throws an error, while requests to your own machine still work.
+
+```console
+$ bun test
+[test-network-guard] This suite serves its own upstreams so a run means the same thing on every box.
+  Serve one: pass a fixture fetcher into the code under test, or assign globalThis.fetch in the test and restore it after.
+  To exercise the real upstream on purpose: TEST_ALLOW_NETWORK=1.
+
+error: [test-network-guard] blocked outbound fetch to https://api.example.com
+```
+
+## Contents
+
+- [Why](#why)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [What is blocked and what is allowed](#what-is-blocked-and-what-is-allowed)
+- [Allowing the network on purpose](#allowing-the-network-on-purpose)
+- [Custom setup](#custom-setup)
+- [API](#api)
+- [Limitations](#limitations)
+- [How it compares](#how-it-compares)
+- [Development](#development)
+- [License](#license)
 
 ## Why
 
-A suite that inherits the network gives a different answer depending on where it runs. A sandbox that reaches nothing passes a test that a CI container with egress fails, because code under test quietly fetched a real upstream on a path the test never asserted on. Those unasserted reads are also where the time goes: in the project this came from, blocking outbound fetch took the full run from 49.3s to 13.7s with every test still passing. Not one of them needed the network.
+When tests can reach the internet, results depend on where they run. A test can pass on a laptop with no internet access and fail in CI, where the same code reaches a real API and gets a different answer. The usual cause is code under test that calls an external service on a path the test never checks.
 
-The usual answers (`nock.disableNetConnect`, MSW's `onUnhandledRequest: "error"`) are interceptor libraries shaped around Node's `http` module. Under Bun's native `fetch` they are either awkward or inert. This is 100 lines that wrap `globalThis.fetch` and nothing else.
+Those calls are also slow. In the project this package was extracted from, blocking them cut the full test run from 49.3 seconds to 13.7 seconds, and every test still passed.
 
-## Limits
+Blocking the network by default makes each test supply its own data. That keeps results the same on every machine.
 
-This wraps `fetch` and nothing else. Traffic through `node:http`, `node:net`, `WebSocket`, or `Bun.connect` is not blocked. A blocked call throws, but code under test that catches the error and degrades will still pass its test. A socket-level guard that patches every one of those, plus an `afterEach` that fails any test which attempted a blocked connection, catches both. If your suite talks to the network through anything but `fetch`, you need that broader approach.
+Bun's built-in `fetch` doesn't go through Node's `http` module, so the usual Node tools for this don't work under Bun. `nock.disableNetConnect()` [has no effect](https://github.com/oven-sh/bun/issues/7544). This package wraps `globalThis.fetch` directly instead.
 
 ## Install
 
+> [!NOTE]
+> This package is not on npm yet. Until the first release, install it from GitHub:
+>
+> ```bash
+> bun add --dev github:zz-plant/bun-test-network-guard
+> ```
+
+After the first release:
+
 ```bash
-bun add -d bun-test-network-guard
+bun add --dev bun-test-network-guard
 ```
 
-`bunfig.toml`:
+Requires Bun 1.1 or later.
+
+## Quick start
+
+Add the guard as a *preload*, a file Bun runs before any test file. In `bunfig.toml` at your project root:
 
 ```toml
 [test]
 preload = ["bun-test-network-guard/preload"]
 ```
 
-That applies to `bun test`, to `bun test <path>`, and to anything that shells out to either.
+That's all the setup. It applies to `bun test`, to `bun test path/to/file.test.ts`, and to any script that runs either.
 
-## What it does
+To give a test the data it needs, replace `fetch` for that test and put it back afterwards:
 
-- Any `fetch` whose target is not loopback throws `[test-network-guard] blocked outbound fetch to <origin>`.
-- Loopback is `localhost`, `::1`, `*.localhost`, and `127.0.0.0/8` matched as four octets. `127.0.0.1.example.com` is a remote host and is blocked.
-- Relative URLs, non-HTTP schemes, and strings that are not URLs pass through so `fetch` can report them itself.
-- The error carries the origin only. Webhook URLs keep their secret in the path and API keys in the query string, and this message lands in CI logs.
-- Guidance prints to stderr once per process, not once per blocked call, because code under test tends to catch and log the error.
-- A test that assigns its own mock over `globalThis.fetch` wins. The guard only decides what an unmocked call does.
+```ts
+import { afterEach, test, expect } from "bun:test";
 
-## Escape hatch
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
-```bash
-TEST_ALLOW_NETWORK=1 bun test test/integration.test.ts
+test("reads the price", async () => {
+  globalThis.fetch = async () => Response.json({ price: 42 });
+  expect(await getPrice()).toBe(42);
+});
 ```
 
-## Custom install
+A test that assigns its own `fetch` this way always wins. The guard only affects calls that no test has replaced. Passing a fake fetch function into the code under test works too.
 
-For a different allow variable, or a hint that names where your repo keeps its fixture fetchers, write your own preload:
+## What is blocked and what is allowed
+
+| Request to | Result |
+| --- | --- |
+| `localhost`, `*.localhost`, `::1` | Allowed |
+| `127.0.0.1` and the rest of `127.x.x.x` | Allowed |
+| A relative URL such as `/api/health` | Allowed |
+| A non-HTTP URL such as `data:` or `file:` | Allowed |
+| Anything else | Throws |
+
+Addresses like `127.0.0.1.example.com` look local but belong to a remote domain, so they are blocked. The guard checks for exactly four numbers, not a text prefix.
+
+The error names only the protocol and host, such as `https://api.example.com`. The path and query are dropped because they often hold secrets: webhook URLs carry a token in the path, and many APIs take a key in the query string. Test output often ends up in CI logs.
+
+The explanation at the top of the example prints once per test run, not once per blocked call. Code under test often catches and logs errors, and repeating the explanation would flood the output.
+
+## Allowing the network on purpose
+
+Set `TEST_ALLOW_NETWORK=1` to turn the guard off for one run:
+
+```bash
+TEST_ALLOW_NETWORK=1 bun test test/integration/live-api.test.ts
+```
+
+## Custom setup
+
+To use a different environment variable, or to point people at your project's fixtures, write your own preload file and reference it from `bunfig.toml`:
 
 ```ts
 // test/preload.ts
 import { installNetworkGuard } from "bun-test-network-guard";
 
 installNetworkGuard({
-  allowEnv: "MYAPP_TEST_ALLOW_NETWORK",
-  hint: "Fixture fetchers live in test/fixtures/fetch.ts.",
+  allowEnv: "MYAPP_ALLOW_NETWORK",
+  hint: "Fake fetchers live in test/fixtures/fetch.ts.",
 });
 ```
 
-`installNetworkGuard` returns a function that restores the previous `fetch`, which is what a test of the guard itself needs.
+```toml
+[test]
+preload = ["./test/preload.ts"]
+```
 
 ## API
 
-- `installNetworkGuard(options?)`: wraps `globalThis.fetch` unless `process.env[allowEnv] === "1"`. Returns a restore function.
-- `createGuardedFetch(passThrough, explain, options?)`: the wrapper itself, for composing with another fetch.
-- `isLocalTarget(url)`, `targetUrl(input)`, `redactTarget(url)`: the pieces, exported for tests and for reuse.
+### `installNetworkGuard(options?)`
+
+Replaces `globalThis.fetch` with the guarded version, unless the allow variable is set to `1`. Returns a function that restores the previous `fetch`.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `allowEnv` | `"TEST_ALLOW_NETWORK"` | Environment variable that turns the guard off when set to `1`. |
+| `hint` | None | An extra line added to the explanation. |
+| `explain` | Writes to stderr | Receives the explanation text the first time a call is blocked. |
+
+### `createGuardedFetch(passThrough, explain, options?)`
+
+Returns a guarded `fetch` that sends allowed requests to `passThrough`. Use it to combine the guard with another `fetch` wrapper.
+
+### Helpers
+
+- `isLocalTarget(url)` returns `true` when the URL is allowed.
+- `redactTarget(url)` returns the protocol and host only.
+- `targetUrl(input)` returns the URL from a string, `URL`, or `Request`.
+
+## Limitations
+
+The guard wraps `fetch` and nothing else.
+
+- **Other ways to connect are not blocked.** That includes `node:http`, `node:https`, `node:net`, `WebSocket`, and `Bun.connect`. If your code uses any of them, this guard won't catch those calls.
+- **A caught error still lets the test pass.** The guard throws, but if the code under test catches the error and carries on, the test can pass without anyone noticing the attempted call.
+
+A stricter approach patches all of those connection methods and fails any test that attempted a blocked connection. [This pull request](https://github.com/SijanC147/better-ccflare/pull/260) shows one way to do it. It is code inside that project, not a package you can install.
+
+## How it compares
+
+| Tool | Works with Bun's `fetch` | Covers non-`fetch` connections | Installable package |
+| --- | --- | --- | --- |
+| **bun-test-network-guard** | Yes | No | Yes |
+| `nock.disableNetConnect()` | [No](https://github.com/oven-sh/bun/issues/7544) | Node `http` and `https` | Yes |
+| Socket-level guard in [better-ccflare](https://github.com/SijanC147/better-ccflare/pull/260) | Yes | Yes | No |
+
+[MSW](https://mswjs.io/) can also reject unmatched requests with `onUnhandledRequest: "error"`. It is a full mocking library, so it is the better choice if you also want to define fake responses in one place.
+
+## Development
+
+```bash
+git clone https://github.com/zz-plant/bun-test-network-guard.git
+cd bun-test-network-guard
+bun install
+bun run check   # type check and tests
+```
 
 ## License
 
-MIT
+[MIT](LICENSE)
