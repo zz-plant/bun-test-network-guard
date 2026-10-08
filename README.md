@@ -39,15 +39,6 @@ Bun's built-in `fetch` doesn't go through Node's `http` module, so the usual Nod
 
 ## Install
 
-> [!NOTE]
-> This package is not on npm yet. Until the first release, install it from GitHub:
->
-> ```bash
-> bun add --dev github:zz-plant/bun-test-network-guard
-> ```
-
-After the first release:
-
 ```bash
 bun add --dev bun-test-network-guard
 ```
