@@ -13,19 +13,7 @@ $ bun test
 error: [test-network-guard] blocked outbound fetch to https://api.example.com
 ```
 
-## Contents
 
-- [Why](#why)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [What is blocked and what is allowed](#what-is-blocked-and-what-is-allowed)
-- [Allowing the network on purpose](#allowing-the-network-on-purpose)
-- [Custom setup](#custom-setup)
-- [API](#api)
-- [Limitations](#limitations)
-- [How it compares](#how-it-compares)
-- [Development](#development)
-- [License](#license)
 
 ## Why
 
