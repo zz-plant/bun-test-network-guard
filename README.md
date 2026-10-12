@@ -1,6 +1,8 @@
 # bun-test-network-guard
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/bun-test-network-guard?style=flat-square)](https://www.npmjs.com/package/bun-test-network-guard)
+[![Bun](https://img.shields.io/badge/bun-%3E%3D1.3-black?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
 Stop `bun test` from reaching the internet. Any `fetch` to a remote host throws an error, while requests to your own machine still work.
 
@@ -145,6 +147,15 @@ A stricter approach patches all of those connection methods and fails any test t
 | Socket-level guard in [better-ccflare](https://github.com/SijanC147/better-ccflare/pull/260) | Yes | Yes | No |
 
 [MSW](https://mswjs.io/) can also reject unmatched requests with `onUnhandledRequest: "error"`. It is a full mocking library, so it is the better choice if you also want to define fake responses in one place.
+
+## Structure
+
+```
+bun-test-network-guard/
+├── src/         # Guard implementation and fetch proxy
+├── test/        # Guard unit and integration test suite
+└── package.json
+```
 
 ## Development
 
